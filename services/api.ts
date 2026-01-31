@@ -1,32 +1,43 @@
 import { ApiResponse, DetailResponse } from '../types';
 
 const BASE_URL = 'https://zeldvorik.ru/apiv3/api.php';
-const PROXY_URL = 'https://corsproxy.io/?';
 
-// Helper to handle fetching with a proxy fallback
+// List of proxies to try in order
+const PROXIES = [
+  'https://corsproxy.io/?',
+  'https://api.allorigins.win/raw?url=',
+];
+
+// Helper to handle fetching with multiple proxy fallbacks
 const fetchWithFallback = async (url: string) => {
+  // 1. Try Direct
   try {
-    // Try direct fetch first
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
+    if (response.ok) {
+        const contentType = response.headers.get("content-type");
+        // Ensure we actually got JSON, not an HTML error page masked as 200 OK
+        if (contentType && contentType.includes("application/json")) {
+             return await response.json();
+        }
     }
-    return await response.json();
-  } catch (error) {
-    console.warn('Direct fetch failed, retrying with proxy...', error);
+  } catch (e) {
+    console.warn('Direct fetch failed, trying proxies...', e);
+  }
+
+  // 2. Try Proxies Loop
+  for (const proxy of PROXIES) {
     try {
-      // Fallback to proxy
-      const proxyUrl = `${PROXY_URL}${encodeURIComponent(url)}`;
+      const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
       const response = await fetch(proxyUrl);
-      if (!response.ok) {
-        throw new Error('Proxy response was not ok');
+      if (response.ok) {
+         return await response.json();
       }
-      return await response.json();
-    } catch (proxyError) {
-      console.error('Proxy fetch failed:', proxyError);
-      throw proxyError;
+    } catch (e) {
+      console.warn(`Proxy ${proxy} failed:`, e);
     }
   }
+
+  throw new Error('All fetch methods failed');
 };
 
 export const fetchContent = async (action: string, page: number = 1): Promise<ApiResponse> => {
