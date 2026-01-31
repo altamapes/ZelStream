@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { fetchDetail } from '../services/api';
 import { MovieDetail, Episode } from '../types';
 import { DetailSkeleton } from '../components/Skeleton';
-import { Play, Calendar, Star, Clock, User, List } from 'lucide-react';
+import { Play, Calendar, Star, Clock, List, ExternalLink, AlertCircle } from 'lucide-react';
 
 const Detail: React.FC = () => {
   const { detailPath } = useParams<{ detailPath: string }>();
@@ -20,12 +20,15 @@ const Detail: React.FC = () => {
       fetchDetail(decodedPath).then((data) => {
         if (data && data.success) {
           setDetail(data.result);
-          // Set initial video URL
+          
+          // Logic to determine initial video URL
           if (data.result.episodes && data.result.episodes.length > 0) {
+            // It's a series, pick first episode
             setActiveEpisode(data.result.episodes[0]);
-            setVideoUrl(data.result.episodes[0].url);
+            setVideoUrl(processUrl(data.result.episodes[0].url));
           } else if (data.result.playerUrl) {
-            setVideoUrl(data.result.playerUrl);
+            // It's a movie
+            setVideoUrl(processUrl(data.result.playerUrl));
           }
         }
         setLoading(false);
@@ -33,9 +36,17 @@ const Detail: React.FC = () => {
     }
   }, [detailPath]);
 
+  // Helper to ensure URL works better in iframes
+  const processUrl = (url: string) => {
+    if (!url) return '';
+    // Handle protocol-relative URLs
+    if (url.startsWith('//')) return `https:${url}`;
+    return url;
+  };
+
   const handleEpisodeClick = (episode: Episode) => {
     setActiveEpisode(episode);
-    setVideoUrl(episode.url);
+    setVideoUrl(processUrl(episode.url));
     // Scroll to player
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -47,20 +58,43 @@ const Detail: React.FC = () => {
     <div className="min-h-screen bg-brand-dark pb-10">
       {/* Video Player Section */}
       <div className="w-full bg-black pt-16">
-        <div className="max-w-7xl mx-auto aspect-video bg-black relative">
-          {videoUrl ? (
-            <iframe
-              src={videoUrl}
-              className="w-full h-full"
-              allowFullScreen
-              title="Video Player"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-500">
-              <p>Video source unavailable</p>
+        <div className="max-w-7xl mx-auto">
+            <div className="aspect-video bg-black relative w-full border-b border-gray-800">
+            {videoUrl ? (
+                <iframe
+                src={videoUrl}
+                className="w-full h-full"
+                allowFullScreen
+                referrerPolicy="origin" // Helps with some streaming providers
+                loading="eager"
+                title="Video Player"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                />
+            ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-gray-500 gap-2">
+                  <AlertCircle className="w-10 h-10" />
+                  <p>Video source unavailable</p>
+                </div>
+            )}
             </div>
-          )}
+            
+            {/* Player Controls / Backup Link */}
+            {videoUrl && (
+                <div className="bg-gray-900 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-sm text-gray-400">
+                        Playing: <span className="text-white font-medium">{activeEpisode ? activeEpisode.title : detail.title}</span>
+                    </span>
+                    <a 
+                        href={videoUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-xs md:text-sm bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded transition-colors"
+                    >
+                        <ExternalLink className="w-4 h-4" />
+                        Video tidak jalan? Tonton di Tab Baru
+                    </a>
+                </div>
+            )}
         </div>
       </div>
 
