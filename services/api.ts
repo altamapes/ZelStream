@@ -1,7 +1,6 @@
 import { ApiResponse, DetailResponse } from '../types';
 
 const BASE_URL = 'https://zeldvorik.ru/apiv3/api.php';
-// New Dramabox API Base URL
 const DRAMABOX_BASE = 'https://dramabox.sansekai.my.id/api/dramabox';
 
 // List of proxies to try in order
@@ -43,14 +42,13 @@ const fetchWithFallback = async (url: string) => {
 };
 
 export const fetchContent = async (action: string, page: number = 1): Promise<ApiResponse> => {
-  try {
-    // USE DRAMABOX API FOR TRENDING
-    if (action === 'trending') {
+  // PRIORITIZE DRAMABOX FOR TRENDING
+  if (action === 'trending') {
+      try {
         const url = `${DRAMABOX_BASE}/trending`;
         const data = await fetchWithFallback(url);
         
-        // Normalize response from Dramabox API
-        // Typically returns { status: true, data: [...] } or just [...]
+        // Normalize Dramabox Response
         const rawItems = Array.isArray(data) ? data : (data.data || data.results || []);
         
         const items = rawItems.map((item: any) => ({
@@ -58,10 +56,10 @@ export const fetchContent = async (action: string, page: number = 1): Promise<Ap
             title: item.title,
             poster: item.poster || item.image || item.thumb || '',
             rating: item.rating || 'Hot',
-            year: item.release || item.year || '',
-            type: 'series', // Dramabox is usually short series
+            year: item.release || item.year || new Date().getFullYear().toString(),
+            type: 'Series', 
             genre: item.genre || 'Drama',
-            // Dramabox items usually provide a full link/url to the detail page
+            // Dramabox returns full links usually
             detailPath: item.link || item.url || ''
         }));
 
@@ -71,13 +69,19 @@ export const fetchContent = async (action: string, page: number = 1): Promise<Ap
             page: 1, 
             hasMore: false 
         };
-    }
+      } catch (error) {
+          console.error(`Error fetching trending from Dramabox:`, error);
+          // Return empty but success to avoid crashing UI, allowing legacy fallbacks if implemented later
+          return { success: false, items: [], page: 1, hasMore: false };
+      }
+  }
 
-    // OLD API for other categories (Legacy)
+  // LEGACY API for other specific categories (Indonesian Movies, etc.)
+  // We keep this so the other tabs in your Navbar still work if possible.
+  try {
     const url = `${BASE_URL}?action=${action}&page=${page}`;
     const data = await fetchWithFallback(url);
     
-    // Ensure items is always an array
     if (!data.items) {
       data.items = [];
     }
@@ -89,14 +93,30 @@ export const fetchContent = async (action: string, page: number = 1): Promise<Ap
 };
 
 export const searchContent = async (query: string): Promise<ApiResponse> => {
+  // USE DRAMABOX FOR SEARCH
   try {
-    const url = `${BASE_URL}?action=search&q=${encodeURIComponent(query)}`;
+    const url = `${DRAMABOX_BASE}/search?q=${encodeURIComponent(query)}`;
     const data = await fetchWithFallback(url);
     
-    if (!data.items) {
-      data.items = [];
-    }
-    return data;
+    const rawItems = Array.isArray(data) ? data : (data.data || data.results || []);
+
+    const items = rawItems.map((item: any) => ({
+        id: item.title || String(Math.random()),
+        title: item.title,
+        poster: item.poster || item.image || item.thumb || '',
+        rating: 'Search',
+        year: item.year || '',
+        type: 'Series',
+        genre: 'Drama',
+        detailPath: item.link || item.url || ''
+    }));
+
+    return {
+        success: true,
+        items: items,
+        page: 1,
+        hasMore: false
+    };
   } catch (error) {
     console.error('Error searching:', error);
     return { success: false, items: [], page: 1, hasMore: false };
@@ -106,23 +126,25 @@ export const searchContent = async (query: string): Promise<ApiResponse> => {
 export const fetchDetail = async (detailPath: string): Promise<DetailResponse | null> => {
   try {
     // INTELLIGENT ROUTING: 
-    // If detailPath is a full URL, it likely comes from the Dramabox API or similar external sources.
+    // If detailPath is a full URL, it matches Dramabox pattern
     if (detailPath.startsWith('http')) {
-        // Construct the detail endpoint for Dramabox
         const url = `${DRAMABOX_BASE}/detail?url=${encodeURIComponent(detailPath)}`;
         const data = await fetchWithFallback(url);
         
         // Normalize Dramabox Detail Response
-        // Usually { status: true, data: { ... } }
         const res = data.data || data.result || data;
         
         if (res) {
-            // Map episodes if they exist (Dramabox usually has an array of episodes)
+            // Map episodes logic for Dramabox
             const episodes = (res.episodes || res.list_episode || []).map((ep: any) => ({
                 id: ep.url || String(Math.random()),
                 title: ep.title || `Episode`,
-                url: ep.link || ep.url // The stream link or nested link
+                url: ep.link || ep.url 
             }));
+
+            // Determine player URL
+            // Sometimes streamUrl is directly available, otherwise take first episode
+            const playerUrl = res.streamUrl || res.videoUrl || (episodes.length > 0 ? episodes[0].url : '');
 
             return {
                 success: true,
@@ -133,9 +155,7 @@ export const fetchDetail = async (detailPath: string): Promise<DetailResponse | 
                     rating: res.rating || 'N/A',
                     genre: res.genre,
                     year: res.release || res.year,
-                    // If there are episodes, the playerUrl might be the first episode, 
-                    // or a standalone streamUrl if it's a movie
-                    playerUrl: res.streamUrl || res.videoUrl || (episodes.length > 0 ? episodes[0].url : ''),
+                    playerUrl: playerUrl,
                     episodes: episodes,
                     duration: res.duration,
                     cast: res.cast,
@@ -145,7 +165,7 @@ export const fetchDetail = async (detailPath: string): Promise<DetailResponse | 
         }
     }
 
-    // Fallback to Old API for legacy items (Zeldvorik)
+    // LEGACY: Fallback to Old API for legacy items (if any exist in other categories)
     const url = `${BASE_URL}?action=detail&detailPath=${encodeURIComponent(detailPath)}`;
     const data = await fetchWithFallback(url);
     return data;
