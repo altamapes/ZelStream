@@ -1,7 +1,8 @@
 import { ApiResponse, DetailResponse } from '../types';
 
 const BASE_URL = 'https://zeldvorik.ru/apiv3/api.php';
-const NEW_API_BASE = 'https://melolo-api-azure.vercel.app/api/melolo';
+// New Dramabox API Base URL
+const DRAMABOX_BASE = 'https://dramabox.sansekai.my.id/api/dramabox';
 
 // List of proxies to try in order
 const PROXIES = [
@@ -43,31 +44,31 @@ const fetchWithFallback = async (url: string) => {
 
 export const fetchContent = async (action: string, page: number = 1): Promise<ApiResponse> => {
   try {
-    // USE NEW API FOR TRENDING / LATEST CONTENT
+    // USE DRAMABOX API FOR TRENDING
     if (action === 'trending') {
-        const url = `${NEW_API_BASE}/latest`;
+        const url = `${DRAMABOX_BASE}/trending`;
         const data = await fetchWithFallback(url);
         
-        // Normalize response from new API
-        // Checks for various array containers usually found in APIs
-        const rawItems = Array.isArray(data) ? data : (data.result || data.results || []);
+        // Normalize response from Dramabox API
+        // Typically returns { status: true, data: [...] } or just [...]
+        const rawItems = Array.isArray(data) ? data : (data.data || data.results || []);
         
         const items = rawItems.map((item: any) => ({
-            id: item.id || item.title || String(Math.random()),
+            id: item.title || String(Math.random()),
             title: item.title,
             poster: item.poster || item.image || item.thumb || '',
-            rating: item.rating || 'New',
-            year: item.year || '',
-            type: item.type || 'movie',
-            genre: item.genre || '',
-            // New API uses full links, we store them as detailPath
-            detailPath: item.link || item.url || item.detailPath || ''
+            rating: item.rating || 'Hot',
+            year: item.release || item.year || '',
+            type: 'series', // Dramabox is usually short series
+            genre: item.genre || 'Drama',
+            // Dramabox items usually provide a full link/url to the detail page
+            detailPath: item.link || item.url || ''
         }));
 
         return {
             success: true,
             items: items,
-            page: 1, // Reset page as latest endpoint usually isn't paginated the same way
+            page: 1, 
             hasMore: false 
         };
     }
@@ -105,26 +106,37 @@ export const searchContent = async (query: string): Promise<ApiResponse> => {
 export const fetchDetail = async (detailPath: string): Promise<DetailResponse | null> => {
   try {
     // INTELLIGENT ROUTING: 
-    // If detailPath is a full URL (from New API), use the new Detail endpoint.
+    // If detailPath is a full URL, it likely comes from the Dramabox API or similar external sources.
     if (detailPath.startsWith('http')) {
-        const url = `${NEW_API_BASE}/detail?link=${encodeURIComponent(detailPath)}`;
+        // Construct the detail endpoint for Dramabox
+        const url = `${DRAMABOX_BASE}/detail?url=${encodeURIComponent(detailPath)}`;
         const data = await fetchWithFallback(url);
         
-        // Normalize New API Detail Response
-        const res = data.result || data;
+        // Normalize Dramabox Detail Response
+        // Usually { status: true, data: { ... } }
+        const res = data.data || data.result || data;
+        
         if (res) {
+            // Map episodes if they exist (Dramabox usually has an array of episodes)
+            const episodes = (res.episodes || res.list_episode || []).map((ep: any) => ({
+                id: ep.url || String(Math.random()),
+                title: ep.title || `Episode`,
+                url: ep.link || ep.url // The stream link or nested link
+            }));
+
             return {
                 success: true,
                 result: {
                     title: res.title,
                     poster: res.poster || res.image || res.thumbnail,
-                    description: res.synopsis || res.description || '',
-                    rating: res.rating,
+                    description: res.synopsis || res.description || 'No description available.',
+                    rating: res.rating || 'N/A',
                     genre: res.genre,
-                    year: res.year,
-                    // Map various video field names to playerUrl
-                    playerUrl: res.streamUrl || res.videoUrl || res.url || res.link,
-                    episodes: res.episodes,
+                    year: res.release || res.year,
+                    // If there are episodes, the playerUrl might be the first episode, 
+                    // or a standalone streamUrl if it's a movie
+                    playerUrl: res.streamUrl || res.videoUrl || (episodes.length > 0 ? episodes[0].url : ''),
+                    episodes: episodes,
                     duration: res.duration,
                     cast: res.cast,
                     director: res.director
@@ -133,7 +145,7 @@ export const fetchDetail = async (detailPath: string): Promise<DetailResponse | 
         }
     }
 
-    // Fallback to Old API for legacy items
+    // Fallback to Old API for legacy items (Zeldvorik)
     const url = `${BASE_URL}?action=detail&detailPath=${encodeURIComponent(detailPath)}`;
     const data = await fetchWithFallback(url);
     return data;
